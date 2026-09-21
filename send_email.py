@@ -1,54 +1,75 @@
 #!/usr/bin/env python3
 """
-Generic email sender for Josh's campaign — model-proof.
-Any AI agent (any model) can fire a campaign email with:
+Generic, model-proof campaign email sender.
 
-  python3 ~/client_campaign/send_email.py \
-    --to info@company.com \
-    --cc jsh.evan@gmail.com \
-    --subject "..." \
-    --body-file ~/client_campaign/body.txt \
-    [--attach /path/to/file.pdf]
+Any AI agent, on any model, can fire a campaign email with:
 
-Defaults:
-  - From: consultingsubsea@agentmail.to (business inbox)
-  - CC: jsh.evan@gmail.com (Josh always sees everything)
-  - Auth: key embedded below (boss key for consultingsubsea inbox)
+  python3 send_email.py \\
+    --to info@company.com \\
+    --cc owner@example.com \\
+    --subject "..." \\
+    --body-file body.txt \\
+    [--attach /path/to/CV.pdf]
+
+Design notes
+  - The key is read from the environment, never stored in the file. A sender that carries a
+    credential is a credential leak waiting for a `git add -A`.
+  - A duplicate-fire guard re-reads the inbox send log before sending and refuses an identical
+    (to, subject) pair unless --force is given. It was added after a real double-send.
+  - Exit codes: 0 sent · 1 send failed · 2 blocked as a duplicate.
 """
-import argparse, base64, os, sys
+import argparse
+import base64
+import os
+import sys
 
-# Key lives in the environment, never in the repo.
-#   Linux/Termux:  export AGENTMAIL_KEY=***
-#   Windows bash:  export AGENTMAIL_KEY=***
-# See .env.example. The live key was removed before publication.
-AM_TOKEN = os.environ.get("AGENTMAIL_KEY", "")
-if not KEY:
-    sys.exit("AGENTMAIL_KEY not set — export your AgentMail inbox-scoped key first.")
-INBOX = "consultingsubsea@agentmail.to"
+REQUESTS_HINT = "pip install requests"
+
+INBOX = os.environ.get("AGENTMAIL_INBOX", "consultingsubsea@agentmail.to")
 API = f"https://api.agentmail.to/inboxes/{INBOX}/messages/send"
-DEFAULT_CV = "/data/data/com.termux/files/home/client_campaign/cv/Joshua_Evans_CV_3.4U.pdf"
+LIST_API = f"https://api.agentmail.to/inboxes/{INBOX}/messages"
+
+# Optional convenience: a default attachment path, used only to WARN when --attach is omitted.
+CAMPAIGN_CV = os.environ.get("CAMPAIGN_CV", os.path.expanduser("~/campaign/cv/CV.pdf"))
+
+AM_TOKEN = os.environ.get("AGENTMAIL_KEY", "")
+
 
 def main():
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description="Send one campaign email via the AgentMail API.")
     p.add_argument("--to", required=True)
-    p.add_argument("--cc", default="jsh.evan@gmail.com")
+    p.add_argument("--cc", default=os.environ.get("CAMPAIGN_CC", ""),
+                   help="always CC the owner so they see every outbound")
     p.add_argument("--subject", required=True)
-    p.add_argument("--body-file", required=True)
-    p.add_argument("--attach", default=None, help="path to attachment (default: no attach)")
-    p.add_argument("--attach-name", default=None)
-    p.add_argument("--force", action="store_true", help="bypass duplicate-fire guard")
+    p.add_argument("--body-file", required=True,
+                   help="file containing ONLY the body, starting at line 1 — no To:/Subject: headers")
+    p.add_argument("--attach", default=None, help="path to an attachment (default: none)")
+    p.add_argument("--attach-name", default=None, help="filename to present for the attachment")
+    p.add_argument("--force", action="store_true",
+                   help="bypass the duplicate-fire guard — only when a second send is intended")
     args = p.parse_args()
+
+    if not AM_TOKEN:
+        sys.exit("AGENTMAIL_KEY not set — export your AgentMail inbox-scoped key first (see .env.example).")
+
+    try:
+        import requests
+    except ImportError:
+        sys.exit(f"missing dependency: {REQUESTS_HINT}")
 
     with open(args.body_file, "r", encoding="utf-8") as f:
         body = f.read()
 
-    payload = {
-        "to": args.to,
-        "subject": args.subject,
-        "text": body,
-    }
+    # A body file that starts with headers means the draft was handed over untrimmed.
+    for hdr in ("To:", "Subject:", "Cc:"):
+        if body.lstrip().startswith(hdr):
+            sys.exit(f"body file starts with '{hdr}' — strip the header lines; this tool sends the "
+                     f"file verbatim and would put them in the message body.")
+
+    payload = {"to": args.to, "subject": args.subject, "text": body}
     if args.cc:
         payload["cc"] = args.cc
+
     if args.attach:
         with open(args.attach, "rb") as f:
             payload["attachments"] = [{
@@ -56,15 +77,14 @@ def main():
                 "content_type": "application/pdf",
                 "content": base64.b64encode(f.read()).decode(),
             }]
+    elif os.path.exists(CAMPAIGN_CV):
+        print(f"NOTE: no --attach given; a CV is available at {CAMPAIGN_CV} (not attached).")
 
-    import requests
-
-    # ---- DUPLICATE-FIRE GUARD (added 2026-08-14 after a double-send) ----
-    # Before sending, check the inbox send log for an identical (to, subject) pair.
-    # If found, ABORT unless --force is given. Prevents the same email landing twice.
-    list_url = f"https://api.agentmail.to/inboxes/{INBOX}/messages?limit=30"
+    # ---- DUPLICATE-FIRE GUARD -------------------------------------------------
+    # The send log is the source of truth. Check it before sending, not after.
     try:
-        lr = requests.get(list_url, headers={"Authorization": "Bearer " + AM_TOKEN}, timeout=20)
+        lr = requests.get(LIST_API, params={"limit": 30},
+                          headers={"Authorization": "Bearer " + AM_TOKEN}, timeout=20)
         if lr.status_code == 200:
             existing = lr.json().get("messages", [])
             dup = [m for m in existing
@@ -78,15 +98,22 @@ def main():
                 sys.exit(2)
             if dup and args.force:
                 print("WARNING: duplicate exists, proceeding due to --force")
+        else:
+            print(f"GUARD CHECK: unexpected status {lr.status_code} — continuing")
     except Exception as e:
+        # Fail-open on the guard, fail-closed on the send. A network blip should not stop the
+        # campaign, but the operator is told the guard did not run.
         print("GUARD CHECK FAILED (continuing):", e)
 
-    r = requests.post(API, headers={"Authorization": "Bearer " + AM_TOKEN, "Content-Type": "application/json"},
+    r = requests.post(API,
+                      headers={"Authorization": "Bearer " + AM_TOKEN,
+                               "Content-Type": "application/json"},
                       json=payload, timeout=40)
     print("STATUS:", r.status_code)
     print("RESP:", r.text)
     if r.status_code != 200:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
