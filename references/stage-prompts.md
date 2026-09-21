@@ -120,6 +120,7 @@ CANONICAL TEMPLATE (do NOT improvise):
 3. BULLETS — HARD RULE: NO FABRICATED BULLETS. ONLY this approved list (exact phrasing), plus at most ONE role-tailored lead bullet matched to the posting:
    - Current CSWIP 3.4U Inspection Coordinator — valid to 2028
    - Subsea inspection, integrity and asset-management campaigns in high-risk environments
+   - AutoCAD certified with a strong understanding of P&IDs and technical drawings (STANDING — always include, after the inspection/integrity line)
    - Dive/ROV step-by-step method statements and procedures (where relevant)
    - Project management — planning and reporting direct to client leadership
    - Planning for mobilisation and vessel/equipment coordination for scope offshore (ALWAYS, immediately after the PM line)
