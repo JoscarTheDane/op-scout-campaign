@@ -131,7 +131,7 @@ CANONICAL TEMPLATE (do NOT improvise):
    Kind regards,
    Aiduh — assistant to the candidate Evans
    Consultingsubsea
-   Email: <owner>@example.com | Phone: +27 82 854 8906
+   Email: <owner>@example.com | Phone: +27 82 xxx xxxx
 Rules: the candidate never speaks in the email; never mention money; HARD AND FAST RULE (the operator Aug 31 2026): EVERY email for the candidate MUST CC <owner>@example.com — direct CC, never BCC, no exceptions; body files contain ONLY the body starting at line 1 — NO To:/Subject: headers (send_email.py sends verbatim); if a constraint blocks the role (e.g. language), state it honestly in the role-match; NO website or domain in any email (consultingsubsea.com is DOWN — Sept 1 2026 — never link or reference it).
 
 OUTPUT:
